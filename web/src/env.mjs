@@ -351,6 +351,37 @@ export const env = createEnv({
     LANGFUSE_ENABLE_QUERY_OPTIMIZATION_SHADOW_TEST: z
       .enum(["true", "false"])
       .default("false"),
+
+    // Remote experiment endpoints configuration
+    // JSON format: [{"label": "Extraction & Analysis", "endpoint": "/remote-experiment-extraction-analysis", "description": "..."}]
+    LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS: z
+      .union([
+        z.string().transform((s) => {
+          try {
+            const parsed = JSON.parse(s);
+            return z
+              .array(
+                z.object({
+                  label: z.string(),
+                  endpoint: z.string(),
+                  description: z.string().optional(),
+                }),
+              )
+              .parse(parsed);
+          } catch (error) {
+            if (error instanceof z.ZodError) {
+              throw new Error(
+                `LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS validation failed: ${error.message}`,
+              );
+            }
+            throw new Error(
+              "LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS must be valid JSON",
+            );
+          }
+        }),
+        z.undefined(),
+      ])
+      .optional(),
   },
 
   /**
@@ -682,6 +713,10 @@ export const env = createEnv({
       process.env.LANGFUSE_ENABLE_EVENTS_TABLE_V2_APIS,
     LANGFUSE_ENABLE_QUERY_OPTIMIZATION_SHADOW_TEST:
       process.env.LANGFUSE_ENABLE_QUERY_OPTIMIZATION_SHADOW_TEST,
+
+    // Remote experiment endpoints
+    LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS:
+      process.env.LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS,
   },
   // Skip validation in Docker builds
   // DOCKER_BUILD is set in Dockerfile

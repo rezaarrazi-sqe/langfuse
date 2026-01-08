@@ -34,10 +34,25 @@ export const observationsRouter = createTRPCRouter({
           shouldJsonParse: false,
         },
       };
-      const obs =
-        env.LANGFUSE_ENABLE_EVENTS_TABLE_OBSERVATIONS === "true"
-          ? await getObservationByIdFromEventsTable(queryOpts)
-          : await getObservationById(queryOpts);
+      
+      let obs;
+      if (env.LANGFUSE_ENABLE_EVENTS_TABLE_OBSERVATIONS === "true") {
+        try {
+          obs = await getObservationByIdFromEventsTable(queryOpts);
+        } catch (error) {
+          // Fallback to old table if events table query fails
+          // This is critical for experiment traces which are excluded from events table
+          // and for observations not yet propagated (within 4-minute delay)
+          if (error instanceof LangfuseNotFoundError) {
+            obs = await getObservationById(queryOpts);
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        obs = await getObservationById(queryOpts);
+      }
+      
       if (!obs) {
         throw new LangfuseNotFoundError(
           "Observation not found within authorized project",

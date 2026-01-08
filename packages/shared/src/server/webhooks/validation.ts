@@ -68,15 +68,31 @@ export async function validateWebhookURL(
     throw new Error("Only HTTP and HTTPS protocols are allowed");
   }
 
-  // Step 2: Port validation
-  if (url.port && !["443", "80"].includes(url.port)) {
-    throw new Error("Only ports 80 and 443 are allowed");
-  }
-
-  // Step 3: Hostname normalization and validation
+  // Step 2: Hostname normalization and validation
   const hostname = normalizeHostname(url.hostname);
 
-  if (whitelist.hosts.includes(hostname)) {
+  // Check if hostname is whitelisted before port validation
+  const isWhitelistedHost = whitelist.hosts.includes(hostname);
+
+  // Step 3: Port validation
+  // Allow custom ports (1-65535) for whitelisted hosts (e.g., localhost:8000)
+  // For non-whitelisted hosts, only allow standard ports 80 and 443
+  if (url.port) {
+    if (isWhitelistedHost) {
+      // For whitelisted hosts, allow any valid port (1-65535)
+      const portNum = parseInt(url.port, 10);
+      if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        throw new Error("Invalid port number");
+      }
+    } else {
+      // For non-whitelisted hosts, only allow standard ports
+      if (!["443", "80"].includes(url.port)) {
+        throw new Error("Only ports 80 and 443 are allowed");
+      }
+    }
+  }
+
+  if (isWhitelistedHost) {
     // skip further checks if hostname is whitelisted
     return;
   }

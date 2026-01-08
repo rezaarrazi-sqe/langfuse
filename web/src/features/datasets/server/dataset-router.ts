@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 import {
   createTRPCRouter,
   protectedProjectProcedure,
+  authenticatedProcedure,
 } from "@/src/server/api/trpc";
 import { Prisma, type Dataset } from "@langfuse/shared/src/db";
 import { throwIfNoProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
@@ -1790,6 +1791,16 @@ export const datasetRouter = createTRPCRouter({
         scope: "datasets:CUD",
       });
 
+      // Validate webhook URL before saving
+      try {
+        await validateWebhookURL(input.url);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Invalid remote run URL: ${error instanceof Error ? error.message : "Unknown error"}`,
+        });
+      }
+
       const dataset = await ctx.prisma.dataset.findUnique({
         where: {
           id_projectId: {
@@ -1845,6 +1856,14 @@ export const datasetRouter = createTRPCRouter({
         payload: dataset.remoteExperimentPayload,
       };
     }),
+  getRemoteExperimentEndpoints: authenticatedProcedure.query(async () => {
+    const { getRemoteExperimentEndpointsServer } = await import(
+      "@/src/features/experiments/utils/remoteExperimentEndpoints"
+    );
+
+    // This function will be called on the server, so it can access server env vars
+    return getRemoteExperimentEndpointsServer();
+  }),
   triggerRemoteExperiment: protectedProjectProcedure
     .input(
       z.object({
