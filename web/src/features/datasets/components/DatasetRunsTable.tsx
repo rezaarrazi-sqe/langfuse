@@ -16,7 +16,7 @@ import { useDebounce } from "@/src/hooks/useDebounce";
 import { useRowHeightLocalStorage } from "@/src/components/table/data-table-row-height-switch";
 import { IOTableCell } from "@/src/components/ui/IOTableCell";
 import { type ScoreAggregate } from "@langfuse/shared";
-import { ChevronDown, Columns3, MoreVertical, Trash } from "lucide-react";
+import { ChevronDown, Columns3, MoreVertical, Trash, Download } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +32,7 @@ import { type RowSelectionState } from "@tanstack/react-table";
 import Link from "next/link";
 import { joinTableCoreAndMetrics } from "@/src/components/table/utils/joinTableCoreAndMetrics";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import { exportExperimentToCsv, downloadCsv } from "@/src/features/datasets/lib/exportExperimentToCsv";
 import {
   RESOURCE_METRICS,
   transformAggregatedRunMetricsToChartData,
@@ -77,6 +78,70 @@ export type DatasetRunRowData = {
   runScores?: ScoreAggregate | undefined;
   description: string;
   metadata: Prisma.JsonValue;
+};
+
+const DatasetRunExportAction = ({
+  projectId,
+  datasetId,
+  datasetRunId,
+  runName,
+}: {
+  projectId: string;
+  datasetId: string;
+  datasetRunId: string;
+  runName: string;
+}) => {
+  const exportExperiment = api.datasets.exportDatasetRunItems.useQuery(
+    {
+      projectId,
+      datasetId,
+      datasetRunId,
+    },
+    {
+      enabled: false, // Only fetch when explicitly called
+    }
+  );
+
+  const handleExportCsv = async () => {
+    try {
+      const result = await exportExperiment.refetch();
+      if (result.data) {
+        const csvContent = exportExperimentToCsv(
+          result.data.runItems,
+          result.data.runName || runName || `experiment-${datasetRunId}`
+        );
+        downloadCsv(csvContent, result.data.runName || runName || `experiment-${datasetRunId}`);
+      }
+    } catch (error) {
+      console.error("Failed to export experiment:", error);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className="h-8 w-8 p-0">
+          <span className="sr-only [position:relative]">Open menu</span>
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={handleExportCsv}
+          disabled={exportExperiment.isFetching}
+        >
+          <Download className="mr-2 h-4 w-4" />
+          Export CSV
+        </DropdownMenuItem>
+        <DeleteDatasetRunButton
+          projectId={projectId}
+          datasetRunId={datasetRunId}
+          datasetId={datasetId}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 };
 
 const DatasetRunTableMultiSelectAction = ({
@@ -536,24 +601,15 @@ export function DatasetRunsTable(props: {
       size: 70,
       cell: ({ row }) => {
         const id: DatasetRunRowData["id"] = row.getValue("id");
+        const name: DatasetRunRowData["name"] = row.getValue("name");
 
         return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only [position:relative]">Open menu</span>
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-              <DeleteDatasetRunButton
-                projectId={props.projectId}
-                datasetRunId={id}
-                datasetId={props.datasetId}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <DatasetRunExportAction
+            projectId={props.projectId}
+            datasetId={props.datasetId}
+            datasetRunId={id}
+            runName={name}
+          />
         );
       },
     },

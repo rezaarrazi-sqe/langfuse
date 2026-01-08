@@ -64,6 +64,8 @@ import {
   getDatasetItemVersionHistory,
   getDatasetItemChangesSinceVersion,
   getDatasetItemsCountGrouped,
+  getTracesByIds,
+  getObservationsById,
 } from "@langfuse/shared/src/server";
 import { aggregateScores } from "@/src/features/scores/lib/aggregateScores";
 import {
@@ -1446,6 +1448,152 @@ export const datasetRouter = createTRPCRouter({
       return {
         totalRunItems,
         runItems: enrichedRunItems,
+      };
+    }),
+
+  exportDatasetRunItems: protectedProjectProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        datasetId: z.string(),
+        datasetRunId: z.string(),
+        filter: z.array(singleFilter).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const { datasetRunId, datasetId, filter: userFilter } = input;
+
+      const datasetRun = await ctx.prisma.datasetRuns.findFirst({
+        where: {
+          id: datasetRunId,
+          projectId: input.projectId,
+        },
+      });
+
+      if (!datasetRun) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Dataset run not found",
+        });
+      }
+
+      const combinedFilter = [
+        ...(userFilter || []),
+        {
+          column: "datasetRunId",
+          operator: "any of",
+          value: [datasetRunId],
+          type: "stringOptions" as const,
+        },
+      ] as FilterState;
+
+      // Fetch all items without pagination for export
+      const [runItems] = await Promise.all([
+        getDatasetRunItemsByDatasetIdCh({
+          projectId: input.projectId,
+          datasetId: datasetId,
+          filter: combinedFilter,
+          orderBy: [
+            {
+              column: "createdAt",
+              order: "ASC",
+            },
+            { column: "datasetItemId", order: "DESC" },
+          ],
+          limit: undefined, // No limit for export
+          offset: undefined,
+        }),
+      ]);
+
+      // Fetch dataset items to get input and expected output
+      // (Some runItems might not have IO fields if includeIO wasn't passed)
+      const uniqueDatasetItemIds = [...new Set(runItems.map((ri) => ri.datasetItemId))];
+      const datasetItems = await Promise.all(
+        uniqueDatasetItemIds.map((itemId) =>
+          getDatasetItemById({
+            projectId: input.projectId,
+            datasetItemId: itemId,
+            includeIO: true,
+          })
+        )
+      );
+      const datasetItemMap = new Map(
+        datasetItems
+          .filter((item): item is NonNullable<typeof item> => item !== null)
+          .map((item) => [item.id, item])
+      );
+
+      const enrichedRunItems = await getRunItemsByRunIdOrItemId(
+        input.projectId,
+        runItems,
+      );
+
+      // Fetch trace and observation input/output for export
+      const traceIds = [...new Set(runItems.map((ri) => ri.traceId))];
+      const observationIds = [
+        ...new Set(
+          runItems
+            .map((ri) => ri.observationId)
+            .filter((id): id is string => id !== null),
+        ),
+      ];
+
+      // Calculate timestamp filter (24h before earliest run item)
+      const minTimestamp = runItems
+        .map((ri) => ri.createdAt)
+        .sort((a, b) => a.getTime() - b.getTime())[0];
+      const filterTimestamp = minTimestamp
+        ? new Date(minTimestamp.getTime() - 24 * 60 * 60 * 1000)
+        : undefined;
+
+      // Fetch traces and observations in parallel
+      const [traces, observations] = await Promise.all([
+        traceIds.length > 0
+          ? getTracesByIds(traceIds, input.projectId, filterTimestamp)
+          : Promise.resolve([]),
+        observationIds.length > 0
+          ? getObservationsById(observationIds, input.projectId, true) // fetchWithInputOutput = true
+          : Promise.resolve([]),
+      ]);
+
+      // Create maps for quick lookup
+      const traceMap = new Map(traces.map((t) => [t.id, t]));
+      const observationMap = new Map(observations.map((o) => [o.id, o]));
+
+      // Enrich with IO data
+      const enrichedWithIO = enrichedRunItems.map((enriched, index) => {
+        const originalItem = runItems[index];
+        const trace = traceMap.get(originalItem.traceId);
+        const observation = originalItem.observationId
+          ? observationMap.get(originalItem.observationId)
+          : undefined;
+
+        // Get dataset item IO - prefer from datasetItemMap (more reliable), fallback to originalItem
+        const datasetItem = datasetItemMap.get(originalItem.datasetItemId);
+        const datasetItemInput =
+          originalItem.datasetItemInput ?? datasetItem?.input;
+        const datasetItemExpectedOutput =
+          originalItem.datasetItemExpectedOutput ?? datasetItem?.expectedOutput;
+
+        // Get metadata from trace (prefer observation metadata if available, otherwise trace metadata)
+        const traceMetadata = observation?.metadata ?? trace?.metadata;
+
+        return {
+          ...enriched,
+          // Dataset item IO (prefer from fetched dataset items, fallback to runItems)
+          datasetItemInput,
+          datasetItemExpectedOutput,
+          // Trace IO
+          traceInput: trace?.input,
+          traceOutput: observation?.output ?? trace?.output,
+          // Metadata (from trace/observation)
+          traceMetadata,
+        };
+      });
+
+      return {
+        runItems: enrichedWithIO,
+        runName: datasetRun.name,
       };
     }),
 

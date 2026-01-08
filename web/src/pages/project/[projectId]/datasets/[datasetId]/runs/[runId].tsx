@@ -4,7 +4,7 @@ import { DatasetRunItemsByRunTable } from "@/src/features/datasets/components/Da
 import { DeleteDatasetRunButton } from "@/src/features/datasets/components/DeleteDatasetRunButton";
 import { DetailPageNav } from "@/src/features/navigate-detail-pages/DetailPageNav";
 import { api } from "@/src/utils/api";
-import { Columns3, MoreVertical } from "lucide-react";
+import { Columns3, MoreVertical, Download } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import Page from "@/src/components/layouts/page";
@@ -21,6 +21,7 @@ import {
   SidePanelTitle,
 } from "@/src/components/ui/side-panel";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import { exportExperimentToCsv, downloadCsv } from "@/src/features/datasets/lib/exportExperimentToCsv";
 
 export default function Dataset() {
   const router = useRouter();
@@ -38,6 +39,32 @@ export default function Dataset() {
     runId,
   });
 
+  const exportExperiment = api.datasets.exportDatasetRunItems.useQuery(
+    {
+      projectId,
+      datasetId,
+      datasetRunId: runId,
+    },
+    {
+      enabled: false, // Only fetch when explicitly called
+    }
+  );
+
+  const handleExportCsv = async () => {
+    try {
+      const result = await exportExperiment.refetch();
+      if (result.data) {
+        const csvContent = exportExperimentToCsv(
+          result.data.runItems,
+          result.data.runName || `experiment-${runId}`
+        );
+        downloadCsv(csvContent, result.data.runName || `experiment-${runId}`);
+      }
+    } catch (error) {
+      console.error("Failed to export experiment:", error);
+    }
+  };
+
   return (
     <Page
       headerProps={{
@@ -53,6 +80,14 @@ export default function Dataset() {
         ],
         actionButtonsRight: (
           <>
+            <Button
+              variant="outline"
+              onClick={handleExportCsv}
+              disabled={exportExperiment.isFetching}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              <span>Export CSV</span>
+            </Button>
             <Link
               href={{
                 pathname: `/project/${projectId}/datasets/${datasetId}/compare`,
