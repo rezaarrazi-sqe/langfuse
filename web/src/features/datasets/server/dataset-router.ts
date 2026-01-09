@@ -1957,7 +1957,12 @@ export const datasetRouter = createTRPCRouter({
         });
       }
 
+      const requestStartTime = Date.now();
       try {
+        logger.info(
+          `Sending remote experiment webhook request to ${dataset.remoteExperimentUrl} for dataset: ${dataset.name}`,
+        );
+        
         const response = await fetch(dataset.remoteExperimentUrl, {
           method: "POST",
           headers: {
@@ -1969,26 +1974,80 @@ export const datasetRouter = createTRPCRouter({
             datasetName: dataset.name,
             payload: input.payload ?? dataset.remoteExperimentPayload,
           }),
-          signal: AbortSignal.timeout(10000), // 10 second timeout
+          signal: AbortSignal.timeout(60000), // 60 second timeout
         });
 
+        const requestDuration = Date.now() - requestStartTime;
+        logger.info(
+          `Received webhook response from ${dataset.remoteExperimentUrl}: status=${response.status}, statusText=${response.statusText}, duration=${requestDuration}ms`,
+        );
+
+        // Read response body once (can only be read once)
+        let responseBody: string = "";
+        try {
+          responseBody = await response.text();
+          if (responseBody) {
+            logger.info(
+              `Webhook response body: ${responseBody.substring(0, 500)}`,
+            );
+          }
+        } catch (e) {
+          logger.warn(`Failed to read response body: ${e instanceof Error ? e.message : "Unknown error"}`);
+        }
+
         if (!response.ok) {
+          // Try to get error message from response body
+          let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          if (responseBody) {
+            try {
+              const errorJson = JSON.parse(responseBody);
+              errorMessage = errorJson.message || errorJson.error || errorMessage;
+            } catch {
+              // If not JSON, use the text as error message
+              errorMessage = responseBody.length > 200 
+                ? `${responseBody.substring(0, 200)}...` 
+                : responseBody;
+            }
+          }
+          
+          logger.warn(
+            `Webhook returned error status ${response.status}: ${errorMessage}`,
+          );
+          
           return {
             success: false,
+            error: errorMessage,
           };
         }
+
+        logger.info(
+          `Webhook request successful (status ${response.status})`,
+        );
 
         return {
           success: true,
         };
       } catch (error) {
+        const requestDuration = Date.now() - requestStartTime;
+        logger.error(
+          `Webhook request failed to ${dataset.remoteExperimentUrl} after ${requestDuration}ms: ${error instanceof Error ? error.message : "Unknown error"}`,
+          error instanceof Error ? { error: error.name, message: error.message, stack: error.stack } : undefined,
+        );
+        
+        let errorMessage = "Unknown error occurred";
         if (error instanceof Error) {
-          return {
-            success: false,
-          };
+          if (error.name === "AbortError" || error.message.includes("timeout")) {
+            errorMessage = "Request timed out after 10 seconds";
+          } else if (error.message.includes("fetch failed") || error.message.includes("ECONNREFUSED")) {
+            errorMessage = `Connection failed: Unable to reach ${dataset.remoteExperimentUrl}`;
+          } else {
+            errorMessage = error.message;
+          }
         }
+        
         return {
           success: false,
+          error: errorMessage,
         };
       }
     }),
