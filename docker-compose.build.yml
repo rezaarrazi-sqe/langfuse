@@ -15,13 +15,13 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "5173:3000"
     environment: &langfuse-web-env
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret}
       SALT: ${SALT:-mysalt}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000} # generate via `openssl rand -hex 32`
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:5173}
       TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
@@ -52,6 +52,11 @@ services:
       REDIS_TLS_CA: ${REDIS_TLS_CA:-/certs/ca.crt}
       REDIS_TLS_CERT: ${REDIS_TLS_CERT:-/certs/redis.crt}
       REDIS_TLS_KEY: ${REDIS_TLS_KEY:-/certs/redis.key}
+      LANGFUSE_WEBHOOK_WHITELISTED_HOST: ${LANGFUSE_WEBHOOK_WHITELISTED_HOST:-localhost}
+      LANGFUSE_WEBHOOK_WHITELISTED_IPS: ${LANGFUSE_WEBHOOK_WHITELISTED_IPS:-}
+      LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS: ${LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS:-'[{"label":"Extraction & Analysis","endpoint":"/remote-experiment-extraction-analysis","description":"For extraction experiments"},{"label":"Labelling","endpoint":"/remote-experiment-labelling","description":"For labelling experiments"}]'}
+      LANGFUSE_REMOTE_EXPERIMENT_BASE_URL: ${LANGFUSE_REMOTE_EXPERIMENT_BASE_URL:-}
+      LANGFUSE_REMOTE_EXPERIMENT_PORT: ${LANGFUSE_REMOTE_EXPERIMENT_PORT:-}
     restart: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/public/health"]

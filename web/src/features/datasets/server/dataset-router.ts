@@ -263,6 +263,35 @@ const generateDatasetQuery = ({
   }
 };
 
+/**
+ * Get enhanced whitelist for remote experiment URL validation.
+ * Automatically includes the base URL hostname from LANGFUSE_REMOTE_EXPERIMENT_BASE_URL.
+ */
+async function getRemoteExperimentWhitelist() {
+  const { whitelistFromEnv } = await import("@langfuse/shared/src/server");
+  const baseWhitelist = whitelistFromEnv();
+  
+  // Extract hostname from base URL if set
+  let enhancedWhitelist = { ...baseWhitelist };
+  try {
+    const { env } = await import("@/src/env.mjs");
+    if (env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL) {
+      const baseUrlStr = env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL.startsWith("http") 
+        ? env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL 
+        : `http://${env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL}`;
+      const baseUrlObj = new URL(baseUrlStr);
+      const baseHostname = baseUrlObj.hostname.toLowerCase();
+      if (!enhancedWhitelist.hosts.includes(baseHostname)) {
+        enhancedWhitelist.hosts = [...enhancedWhitelist.hosts, baseHostname];
+      }
+    }
+  } catch {
+    // If base URL parsing fails, use base whitelist as-is
+  }
+  
+  return enhancedWhitelist;
+}
+
 export const datasetRouter = createTRPCRouter({
   hasAny: protectedProjectProcedure
     .input(
@@ -1792,8 +1821,10 @@ export const datasetRouter = createTRPCRouter({
       });
 
       // Validate webhook URL before saving
+      // Automatically whitelist the base URL hostname if configured
       try {
-        await validateWebhookURL(input.url);
+        const enhancedWhitelist = await getRemoteExperimentWhitelist();
+        await validateWebhookURL(input.url, enhancedWhitelist);
       } catch (error) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1864,6 +1895,13 @@ export const datasetRouter = createTRPCRouter({
     // This function will be called on the server, so it can access server env vars
     return getRemoteExperimentEndpointsServer();
   }),
+  getRemoteExperimentConfig: authenticatedProcedure.query(async () => {
+    const { env } = await import("@/src/env.mjs");
+    return {
+      baseUrl: env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL || null,
+      port: env.LANGFUSE_REMOTE_EXPERIMENT_PORT || null,
+    };
+  }),
   triggerRemoteExperiment: protectedProjectProcedure
     .input(
       z.object({
@@ -1909,7 +1947,9 @@ export const datasetRouter = createTRPCRouter({
       }
 
       try {
-        await validateWebhookURL(dataset.remoteExperimentUrl);
+        // Automatically whitelist the base URL hostname if configured
+        const enhancedWhitelist = await getRemoteExperimentWhitelist();
+        await validateWebhookURL(dataset.remoteExperimentUrl, enhancedWhitelist);
       } catch (error) {
         throw new TRPCError({
           code: "BAD_REQUEST",

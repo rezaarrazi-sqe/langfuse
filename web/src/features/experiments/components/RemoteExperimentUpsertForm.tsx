@@ -27,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/src/components/ui/select";
-import { Switch } from "@/src/components/ui/switch";
 import { api } from "@/src/utils/api";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { showSuccessToast } from "@/src/features/notifications/showSuccessToast";
@@ -39,61 +38,54 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import { getFormattedPayload } from "@/src/features/experiments/utils/format";
 import { DEFAULT_ENDPOINTS } from "@/src/features/experiments/utils/remoteExperimentEndpoints";
 
-// Schema for split fields mode
-const RemoteExperimentSetupSchemaSplit = z.object({
-  baseUrl: z.string().min(1, "Base URL is required"),
-  port: z.string().optional(),
+// Schema for endpoint-only mode (host/port from env)
+const RemoteExperimentSetupSchemaEndpointOnly = z.object({
   endpoint: z.string().min(1, "Endpoint is required"),
   defaultPayload: z.string(),
 });
 
-// Schema for single URL mode
+// Schema for single URL mode (legacy)
 const RemoteExperimentSetupSchemaSingle = z.object({
   url: z.string().url("Invalid URL"),
   defaultPayload: z.string(),
 });
 
-type RemoteExperimentSetupFormSplit = z.infer<typeof RemoteExperimentSetupSchemaSplit>;
+type RemoteExperimentSetupFormEndpointOnly = z.infer<typeof RemoteExperimentSetupSchemaEndpointOnly>;
 type RemoteExperimentSetupFormSingle = z.infer<typeof RemoteExperimentSetupSchemaSingle>;
 
 // Helper function to parse existing URL
 function parseExistingUrl(url: string | undefined): {
-  baseUrl: string;
-  port: string;
   endpoint: string;
 } {
   if (!url) {
-    return { baseUrl: "", port: "", endpoint: "" };
+    return { endpoint: "" };
   }
 
   try {
     const urlObj = new URL(url);
-    const baseUrl = urlObj.hostname;
-    const port = urlObj.port || "";
-    const pathname = urlObj.pathname;
-
     return {
-      baseUrl,
-      port,
-      endpoint: pathname,
+      endpoint: urlObj.pathname,
     };
   } catch {
     // If URL parsing fails, try to extract manually
     const match = url.match(/^(https?:\/\/)?([^:\/]+)(:(\d+))?(\/.*)?$/);
     if (match) {
       return {
-        baseUrl: match[2] || "",
-        port: match[4] || "",
         endpoint: match[5] || "",
       };
     }
-    return { baseUrl: url, port: "", endpoint: "" };
+    return { endpoint: "" };
   }
 }
 
-// Helper function to build URL from form values
-function buildUrl(baseUrl: string, port: string | undefined, endpoint: string): string {
-  const protocol = baseUrl === "localhost" ? "http" : "https";
+// Helper function to build URL from env config and endpoint
+function buildUrlFromEnv(baseUrl: string | null, port: number | null, endpoint: string): string {
+  if (!baseUrl) {
+    throw new Error("Base URL not configured");
+  }
+
+  // Determine protocol based on hostname
+  const protocol = (baseUrl === "localhost" || baseUrl === "host.docker.internal") ? "http" : "https";
   const host = port ? `${baseUrl}:${port}` : baseUrl;
   return `${protocol}://${host}${endpoint}`;
 }
@@ -130,17 +122,21 @@ export const RemoteExperimentUpsertForm = ({
       ? endpointsQuery.data
       : DEFAULT_ENDPOINTS;
 
+  // Get env config (base URL and port)
+  const envConfigQuery = api.datasets.getRemoteExperimentConfig.useQuery();
+  const hasEnvConfig = envConfigQuery.data?.baseUrl !== null && envConfigQuery.data?.baseUrl !== undefined;
+
   const parsedUrl = parseExistingUrl(existingRemoteExperiment?.url);
   
-  // State for toggle between split fields and single URL
-  const [useSplitFields, setUseSplitFields] = useState(true);
+  // Determine initial mode: endpoint-only if env config exists, otherwise single URL
+  const [mode, setMode] = useState<"endpoint-only" | "single">(
+    hasEnvConfig ? "endpoint-only" : "single"
+  );
 
-  // Form for split fields mode
-  const formSplit = useForm<RemoteExperimentSetupFormSplit>({
-    resolver: zodResolver(RemoteExperimentSetupSchemaSplit),
+  // Form for endpoint-only mode
+  const formEndpointOnly = useForm<RemoteExperimentSetupFormEndpointOnly>({
+    resolver: zodResolver(RemoteExperimentSetupSchemaEndpointOnly),
     defaultValues: {
-      baseUrl: parsedUrl.baseUrl || "localhost",
-      port: parsedUrl.port || "8000",
       endpoint: parsedUrl.endpoint || availableEndpoints[0]?.value || "",
       defaultPayload: getFormattedPayload(existingRemoteExperiment?.payload),
     },
@@ -155,26 +151,22 @@ export const RemoteExperimentUpsertForm = ({
     },
   });
 
-  // Sync data between forms when toggle changes
+  // Sync data between forms when mode changes
   useEffect(() => {
-    if (useSplitFields) {
+    if (mode === "endpoint-only") {
       const urlValue = formSingle.watch("url");
       if (urlValue) {
         const parsed = parseExistingUrl(urlValue);
-        formSplit.setValue("baseUrl", parsed.baseUrl || "localhost");
-        formSplit.setValue("port", parsed.port || "8000");
-        formSplit.setValue("endpoint", parsed.endpoint || availableEndpoints[0]?.value || "");
+        formEndpointOnly.setValue("endpoint", parsed.endpoint || availableEndpoints[0]?.value || "");
       }
     } else {
-      const baseUrl = formSplit.watch("baseUrl");
-      const port = formSplit.watch("port");
-      const endpoint = formSplit.watch("endpoint");
-      if (baseUrl && endpoint) {
-        const fullUrl = buildUrl(baseUrl, port, endpoint);
-        formSingle.setValue("url", fullUrl);
+      // When switching to single URL mode, we can't reconstruct the full URL from endpoint only
+      // So we leave it as is or clear it
+      if (!formSingle.watch("url")) {
+        formSingle.setValue("url", "");
       }
     }
-  }, [useSplitFields, formSplit, formSingle, availableEndpoints]);
+  }, [mode, formEndpointOnly, formSingle, availableEndpoints]);
 
   const upsertRemoteExperimentMutation =
     api.datasets.upsertRemoteExperiment.useMutation({
@@ -215,26 +207,42 @@ export const RemoteExperimentUpsertForm = ({
       },
     });
 
-  const onSubmitSplit = (data: RemoteExperimentSetupFormSplit) => {
+  const onSubmitEndpointOnly = (data: RemoteExperimentSetupFormEndpointOnly) => {
     if (data.defaultPayload.trim()) {
       try {
         JSON.parse(data.defaultPayload);
       } catch {
-        formSplit.setError("defaultPayload", {
+        formEndpointOnly.setError("defaultPayload", {
           message: "Invalid JSON format",
         });
         return;
       }
     }
 
-    const fullUrl = buildUrl(data.baseUrl, data.port || "", data.endpoint);
+    if (!envConfigQuery.data?.baseUrl) {
+      showErrorToast("Configuration error", "Remote experiment base URL not configured");
+      return;
+    }
 
-    upsertRemoteExperimentMutation.mutate({
-      projectId,
-      datasetId,
-      url: fullUrl,
-      defaultPayload: data.defaultPayload,
-    });
+    try {
+      const fullUrl = buildUrlFromEnv(
+        envConfigQuery.data.baseUrl,
+        envConfigQuery.data.port || null,
+        data.endpoint
+      );
+
+      upsertRemoteExperimentMutation.mutate({
+        projectId,
+        datasetId,
+        url: fullUrl,
+        defaultPayload: data.defaultPayload,
+      });
+    } catch (error) {
+      showErrorToast(
+        error instanceof Error ? error.message : "Failed to build URL",
+        "Please check your environment configuration."
+      );
+    }
   };
 
   const onSubmitSingle = (data: RemoteExperimentSetupFormSingle) => {
@@ -278,11 +286,10 @@ export const RemoteExperimentUpsertForm = ({
     return <Skeleton className="h-48 w-full" />;
   }
 
-  const baseUrl = formSplit.watch("baseUrl") || "";
-  const port = formSplit.watch("port");
-  const endpoint = formSplit.watch("endpoint") || "";
-  const previewUrl = buildUrl(baseUrl, port, endpoint);
-  const singleUrl = formSingle.watch("url") || "";
+  const selectedEndpoint = formEndpointOnly.watch("endpoint");
+  const selectedEndpointData = availableEndpoints.find(
+    (ep) => ep.value === selectedEndpoint
+  );
 
   return (
     <>
@@ -315,130 +322,103 @@ export const RemoteExperimentUpsertForm = ({
       </DialogHeader>
 
       <div className="space-y-4">
-        {/* Toggle Switch */}
-        <div className="flex items-center justify-between rounded-md border p-4">
-          <div className="space-y-0.5">
-            <label className="text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-              Use split fields
-            </label>
-            <p className="text-sm text-muted-foreground">
-              {useSplitFields
-                ? "Enter host, port, and endpoint separately for better UX"
-                : "Enter the full URL in a single field"}
-            </p>
+        {/* Mode Selection */}
+        {hasEnvConfig && (
+          <div className="flex items-center justify-between rounded-md border p-4">
+            <div className="space-y-0.5">
+              <label className="text-base font-medium leading-none">
+                Configuration Mode
+              </label>
+              <p className="text-sm text-muted-foreground">
+                {mode === "endpoint-only"
+                  ? "Select endpoint only (host/port configured via environment)"
+                  : "Enter the full URL manually"}
+              </p>
+            </div>
+            <Select
+              value={mode}
+              onValueChange={(value) => setMode(value as typeof mode)}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="endpoint-only">Endpoint Only</SelectItem>
+                <SelectItem value="single">Single URL</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <Switch
-            checked={useSplitFields}
-            onCheckedChange={setUseSplitFields}
-          />
-        </div>
+        )}
 
-        {useSplitFields ? (
-          <Form {...formSplit}>
-            <form onSubmit={formSplit.handleSubmit(onSubmitSplit)} className="space-y-4">
+        {mode === "endpoint-only" && hasEnvConfig ? (
+          <Form {...formEndpointOnly}>
+            <form
+              onSubmit={formEndpointOnly.handleSubmit(onSubmitEndpointOnly)}
+              className="space-y-4"
+            >
               <DialogBody>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-4">
-                    <FormField
-                      control={formSplit.control}
-                      name="baseUrl"
-                      render={({ field }) => (
+                  <FormField
+                    control={formEndpointOnly.control}
+                    name="endpoint"
+                    render={({ field }) => {
+                      return (
                         <FormItem>
-                          <FormLabel>Host</FormLabel>
-                          <FormDescription>Server hostname or IP</FormDescription>
-                          <FormControl>
-                            <Input placeholder="localhost" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={formSplit.control}
-                      name="port"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Port (optional)</FormLabel>
-                          <FormDescription>Server port (defaults to 80/443)</FormDescription>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              placeholder="8000"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={formSplit.control}
-                      name="endpoint"
-                      render={({ field }) => {
-                        const selectedEndpoint = availableEndpoints.find(
-                          (ep) => ep.value === field.value
-                        );
-                        return (
-                          <FormItem>
-                            <FormLabel>Endpoint</FormLabel>
-                            <FormDescription>API endpoint</FormDescription>
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                              value={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select endpoint">
-                                    {selectedEndpoint ? selectedEndpoint.value : "Select endpoint"}
-                                  </SelectValue>
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {availableEndpoints.map((ep) => (
-                                  <SelectItem key={ep.value} value={ep.value}>
-                                    <div className="flex flex-col">
-                                      <span>{ep.label}</span>
-                                      {ep.description && (
-                                        <span className="text-xs text-muted-foreground">
-                                          {ep.description}
-                                        </span>
-                                      )}
-                                      <span className="text-xs text-muted-foreground font-mono">
-                                        {ep.value}
+                          <FormLabel>Endpoint</FormLabel>
+                          <FormDescription>
+                            Select the API endpoint to use. Host and port are
+                            configured via environment variables.
+                          </FormDescription>
+                          <Select
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                            value={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select endpoint">
+                                  {selectedEndpointData
+                                    ? selectedEndpointData.value
+                                    : "Select endpoint"}
+                                </SelectValue>
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {availableEndpoints.map((ep) => (
+                                <SelectItem key={ep.value} value={ep.value}>
+                                  <div className="flex flex-col">
+                                    <span>{ep.label}</span>
+                                    {ep.description && (
+                                      <span className="text-xs text-muted-foreground">
+                                        {ep.description}
                                       </span>
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        );
-                      }}
-                    />
-                  </div>
-
-                  <div className="rounded-md bg-muted p-3">
-                    <p className="text-sm font-medium mb-1">Preview URL:</p>
-                    <p className="text-sm text-muted-foreground font-mono break-all">
-                      {previewUrl}
-                    </p>
-                  </div>
+                                    )}
+                                    <span className="text-xs text-muted-foreground font-mono">
+                                      {ep.value}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
+                  />
+                  {/* No preview URL shown - host/port are hidden */}
                 </div>
 
                 <FormField
-                  control={formSplit.control}
+                  control={formEndpointOnly.control}
                   name="defaultPayload"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Default config</FormLabel>
                       <FormDescription>
-                        Set a default config that will be sent to the remote dataset
-                        run URL. This can be modified before starting a new run.
-                        View docs for more details.
+                        Set a default config that will be sent to the remote
+                        dataset run URL. This can be modified before starting a
+                        new run. View docs for more details.
                       </FormDescription>
                       <CodeMirrorEditor
                         value={field.value}
@@ -484,7 +464,10 @@ export const RemoteExperimentUpsertForm = ({
           </Form>
         ) : (
           <Form {...formSingle}>
-            <form onSubmit={formSingle.handleSubmit(onSubmitSingle)} className="space-y-4">
+            <form
+              onSubmit={formSingle.handleSubmit(onSubmitSingle)}
+              className="space-y-4"
+            >
               <DialogBody>
                 <FormField
                   control={formSingle.control}
@@ -493,8 +476,8 @@ export const RemoteExperimentUpsertForm = ({
                     <FormItem>
                       <FormLabel>URL</FormLabel>
                       <FormDescription>
-                        The URL that will be called when the remote dataset run is
-                        triggered.
+                        The URL that will be called when the remote dataset run
+                        is triggered.
                       </FormDescription>
                       <FormControl>
                         <Input
@@ -514,9 +497,9 @@ export const RemoteExperimentUpsertForm = ({
                     <FormItem>
                       <FormLabel>Default config</FormLabel>
                       <FormDescription>
-                        Set a default config that will be sent to the remote dataset
-                        run URL. This can be modified before starting a new run.
-                        View docs for more details.
+                        Set a default config that will be sent to the remote
+                        dataset run URL. This can be modified before starting a
+                        new run. View docs for more details.
                       </FormDescription>
                       <CodeMirrorEditor
                         value={field.value}

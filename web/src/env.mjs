@@ -382,6 +382,9 @@ export const env = createEnv({
         z.undefined(),
       ])
       .optional(),
+    // Remote experiment base URL and port (for endpoint-only mode)
+    LANGFUSE_REMOTE_EXPERIMENT_BASE_URL: z.string().optional(),
+    LANGFUSE_REMOTE_EXPERIMENT_PORT: z.coerce.number().int().positive().max(65535).optional(),
   },
 
   /**
@@ -717,6 +720,10 @@ export const env = createEnv({
     // Remote experiment endpoints
     LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS:
       process.env.LANGFUSE_REMOTE_EXPERIMENT_ENDPOINTS,
+    LANGFUSE_REMOTE_EXPERIMENT_BASE_URL:
+      process.env.LANGFUSE_REMOTE_EXPERIMENT_BASE_URL,
+    LANGFUSE_REMOTE_EXPERIMENT_PORT:
+      process.env.LANGFUSE_REMOTE_EXPERIMENT_PORT,
   },
   // Skip validation in Docker builds
   // DOCKER_BUILD is set in Dockerfile
