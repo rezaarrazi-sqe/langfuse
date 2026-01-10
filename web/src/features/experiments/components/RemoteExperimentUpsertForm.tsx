@@ -84,10 +84,31 @@ function buildUrlFromEnv(baseUrl: string | null, port: number | null, endpoint: 
     throw new Error("Base URL not configured");
   }
 
-  // Determine protocol based on hostname
-  const protocol = (baseUrl === "localhost" || baseUrl === "host.docker.internal") ? "http" : "https";
+  // If baseUrl already includes protocol (http:// or https://), use it as-is
+  if (baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) {
+    // If port is provided and baseUrl doesn't already have a port, add it
+    if (port) {
+      try {
+        const url = new URL(baseUrl);
+        // Only add port if URL doesn't already have one
+        if (!url.port) {
+          url.port = port.toString();
+        }
+        return `${url.toString()}${endpoint}`;
+      } catch {
+        // If URL parsing fails, just append port before endpoint
+        const separator = baseUrl.endsWith("/") ? "" : "/";
+        return `${baseUrl}:${port}${separator}${endpoint}`;
+      }
+    }
+    // No port to add, just append endpoint
+    return `${baseUrl}${endpoint}`;
+  }
+
+  // Legacy support: if baseUrl is just a hostname, treat as http for backward compatibility
+  // This handles cases like "localhost", "host.docker.internal", "api"
   const host = port ? `${baseUrl}:${port}` : baseUrl;
-  return `${protocol}://${host}${endpoint}`;
+  return `http://${host}${endpoint}`;
 }
 
 export const RemoteExperimentUpsertForm = ({

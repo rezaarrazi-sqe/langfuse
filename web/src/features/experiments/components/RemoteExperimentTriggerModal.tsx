@@ -78,7 +78,7 @@ export const RemoteExperimentTriggerModal = ({
         } else {
           showErrorToast(
             "Failed to start dataset run",
-            "Please try again or check your remote dataset run configuration.",
+            data.error || "Please try again or check your remote dataset run configuration.",
           );
         }
         setShowTriggerModal(false);
@@ -86,7 +86,7 @@ export const RemoteExperimentTriggerModal = ({
       onError: (error) => {
         showErrorToast(
           error.message || "Failed to start dataset run",
-          "Please try again or check your remote dataset run configuration.",
+          "Please check your remote dataset run configuration and try again.",
         );
       },
     });
