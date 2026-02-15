@@ -9,6 +9,13 @@ import { isPresent } from "@langfuse/shared";
 export const convertRunItemToItemsByItemUiTableRow = (
   item: EnrichedDatasetRunItem,
 ): DatasetRunItemByItemRowData => {
+  // Token usage: priority observation > trace (matches cost pattern exactly)
+  const totalUsage =
+    item.observation?.totalUsage ?? item.trace?.totalUsage ?? 0;
+  const inputUsage = item.observation?.inputUsage ?? item.trace?.inputUsage ?? 0;
+  const outputUsage =
+    item.observation?.outputUsage ?? item.trace?.outputUsage ?? 0;
+
   return {
     id: item.id,
     runAt: item.createdAt,
@@ -26,12 +33,28 @@ export const convertRunItemToItemsByItemUiTableRow = (
         ? usdFormatter(item.trace.totalCost)
         : undefined,
     latency: item.observation?.latency ?? item.trace?.duration ?? undefined,
+    totalUsage: totalUsage > 0 ? totalUsage.toLocaleString() : undefined,
+    usageDetails:
+      totalUsage > 0
+        ? {
+            input: inputUsage,
+            output: outputUsage,
+            total: totalUsage,
+          }
+        : undefined,
   };
 };
 
 export const convertRunItemToItemsByRunUiTableRow = (
   item: EnrichedDatasetRunItem,
 ): DatasetRunItemByRunRowData => {
+  // Token usage: priority observation > trace (matches cost pattern exactly)
+  const totalUsage =
+    item.observation?.totalUsage ?? item.trace?.totalUsage ?? 0;
+  const inputUsage = item.observation?.inputUsage ?? item.trace?.inputUsage ?? 0;
+  const outputUsage =
+    item.observation?.outputUsage ?? item.trace?.outputUsage ?? 0;
+
   return {
     id: item.id,
     runAt: item.createdAt,
@@ -49,5 +72,14 @@ export const convertRunItemToItemsByRunUiTableRow = (
         ? usdFormatter(item.trace.totalCost)
         : undefined,
     latency: item.observation?.latency ?? item.trace?.duration ?? undefined,
+    totalUsage: totalUsage > 0 ? totalUsage.toLocaleString() : undefined,
+    usageDetails:
+      totalUsage > 0
+        ? {
+            input: inputUsage,
+            output: outputUsage,
+            total: totalUsage,
+          }
+        : undefined,
   };
 };

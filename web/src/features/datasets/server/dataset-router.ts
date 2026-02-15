@@ -610,6 +610,12 @@ export const datasetRouter = createTRPCRouter({
           avgTotalCost: run.avgTotalCost ?? null,
           totalCost: run.totalCost ?? null,
           avgLatency: run.avgLatency ?? null,
+          avgInputUsage: run.avgInputUsage ?? 0,
+          avgOutputUsage: run.avgOutputUsage ?? 0,
+          avgTotalUsage: run.avgTotalUsage ?? 0,
+          totalInputUsage: run.totalInputUsage ?? 0,
+          totalOutputUsage: run.totalOutputUsage ?? 0,
+          totalUsage: run.totalUsage ?? 0,
           scores: aggregateScores(
             traceScores.filter((s) => s.datasetRunId === run.id),
           ),

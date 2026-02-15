@@ -95,6 +95,12 @@ export type DatasetRunsMetrics = {
   avgTotalCost: Decimal;
   totalCost: Decimal;
   avgLatency: number;
+  avgInputUsage: number;
+  avgOutputUsage: number;
+  avgTotalUsage: number;
+  totalInputUsage: number;
+  totalOutputUsage: number;
+  totalUsage: number;
   aggScoresAvg: Array<[string, number]>;
   aggScoreCategories: string[];
 };
@@ -118,6 +124,12 @@ type DatasetRunsMetricsRecordType = {
   avg_latency_seconds: number;
   avg_total_cost: number;
   total_cost: number;
+  avg_input_usage: number;
+  avg_output_usage: number;
+  avg_total_usage: number;
+  total_input_usage: number;
+  total_output_usage: number;
+  total_usage: number;
   agg_scores_avg: Array<[string, number]>;
   agg_score_categories: string[];
 };
@@ -143,12 +155,18 @@ export type EnrichedDatasetRunItem = {
         id: string;
         latency: number;
         calculatedTotalCost: Decimal;
+        inputUsage: number;
+        outputUsage: number;
+        totalUsage: number;
       }
     | undefined;
   trace: {
     id: string;
     duration: number;
     totalCost: number;
+    inputUsage: number;
+    outputUsage: number;
+    totalUsage: number;
   };
   scores: ScoreAggregate;
 };
@@ -169,6 +187,12 @@ const convertDatasetRunsMetricsRecord = (
       ? new Decimal(record.total_cost)
       : new Decimal(0),
     avgLatency: record.avg_latency_seconds ?? 0,
+    avgInputUsage: record.avg_input_usage ?? 0,
+    avgOutputUsage: record.avg_output_usage ?? 0,
+    avgTotalUsage: record.avg_total_usage ?? 0,
+    totalInputUsage: record.total_input_usage ?? 0,
+    totalOutputUsage: record.total_output_usage ?? 0,
+    totalUsage: record.total_usage ?? 0,
     aggScoresAvg: record.agg_scores_avg ?? [],
     aggScoreCategories: record.agg_score_categories ?? [],
   };
@@ -259,7 +283,7 @@ const getDatasetRunsTableInternal = async <T>(
           ELSE drm.obs_avg_latency
         END as avg_latency_seconds,
         
-        -- Cost metrics (priority: trace > observation - matching old PostgreSQL behavior)  
+        -- Cost metrics (priority: trace > observation - matching old PostgreSQL behavior)
         CASE
           WHEN drm.trace_avg_cost IS NOT NULL THEN drm.trace_avg_cost
           ELSE COALESCE(drm.obs_avg_cost, 0)
@@ -268,6 +292,32 @@ const getDatasetRunsTableInternal = async <T>(
           WHEN drm.trace_total_cost IS NOT NULL THEN drm.trace_total_cost
           ELSE COALESCE(drm.obs_total_cost, 0)
         END as total_cost,
+
+        -- Token usage metrics (priority: trace > observation - matching old PostgreSQL behavior)
+        CASE
+          WHEN drm.trace_avg_input_usage IS NOT NULL THEN drm.trace_avg_input_usage
+          ELSE COALESCE(drm.obs_avg_input_usage, 0)
+        END as avg_input_usage,
+        CASE
+          WHEN drm.trace_avg_output_usage IS NOT NULL THEN drm.trace_avg_output_usage
+          ELSE COALESCE(drm.obs_avg_output_usage, 0)
+        END as avg_output_usage,
+        CASE
+          WHEN drm.trace_avg_total_usage IS NOT NULL THEN drm.trace_avg_total_usage
+          ELSE COALESCE(drm.obs_avg_total_usage, 0)
+        END as avg_total_usage,
+        CASE
+          WHEN drm.trace_total_input_usage IS NOT NULL THEN drm.trace_total_input_usage
+          ELSE COALESCE(drm.obs_total_input_usage, 0)
+        END as total_input_usage,
+        CASE
+          WHEN drm.trace_total_output_usage IS NOT NULL THEN drm.trace_total_output_usage
+          ELSE COALESCE(drm.obs_total_output_usage, 0)
+        END as total_output_usage,
+        CASE
+          WHEN drm.trace_total_usage IS NOT NULL THEN drm.trace_total_usage
+          ELSE COALESCE(drm.obs_total_usage, 0)
+        END as total_usage,
 
         -- Score aggregations
         sa.scores_avg as agg_scores_avg,
@@ -370,22 +420,23 @@ const getDatasetRunsTableInternal = async <T>(
         o.project_id,
         o.start_time,
         o.end_time,
-        o.total_cost
+        o.total_cost,
+        o.usage_details
       FROM observations o
       WHERE o.project_id = {projectId: String}
         AND o.start_time >= (
-          SELECT min(dri.dataset_run_created_at) - INTERVAL 1 DAY 
-          FROM dataset_run_items_rmt dri 
+          SELECT min(dri.dataset_run_created_at) - INTERVAL 1 DAY
+          FROM dataset_run_items_rmt dri
           WHERE ${baseFilter.query}
         )
         AND o.start_time <= (
-          SELECT max(dri.dataset_run_created_at) + INTERVAL 1 DAY 
-          FROM dataset_run_items_rmt dri 
+          SELECT max(dri.dataset_run_created_at) + INTERVAL 1 DAY
+          FROM dataset_run_items_rmt dri
           WHERE ${baseFilter.query}
         )
         AND o.trace_id in  (
           SELECT dri.trace_id
-          FROM dataset_run_items_rmt dri 
+          FROM dataset_run_items_rmt dri
           WHERE ${baseFilter.query}
         )
       ORDER BY o.event_ts DESC
@@ -412,7 +463,9 @@ const getDatasetRunsTableInternal = async <T>(
         dri.dataset_run_id,
         dri.dataset_item_id,
         dateDiff('millisecond', min(of.start_time), max(of.end_time)) as latency_ms,
-        sum(of.total_cost) as total_cost
+        sum(of.total_cost) as total_cost,
+        -- Token usage aggregations
+        sumMap(of.usage_details) as total_usage_details
       FROM dataset_run_items_deduped dri
       JOIN observations_filtered of ON dri.trace_id = of.trace_id
         AND dri.project_id = of.project_id
@@ -442,7 +495,51 @@ const getDatasetRunsTableInternal = async <T>(
           dateDiff('millisecond', of.start_time, of.end_time) / 1000.0
         ELSE NULL END) as obs_avg_latency,
         AVG(CASE WHEN dri.observation_id IS NOT NULL THEN tm.total_cost ELSE NULL END) as obs_avg_cost,
-        SUM(CASE WHEN dri.observation_id IS NOT NULL THEN tm.total_cost ELSE NULL END) as obs_total_cost
+        SUM(CASE WHEN dri.observation_id IS NOT NULL THEN tm.total_cost ELSE NULL END) as obs_total_cost,
+
+        -- Trace-level token usage metrics
+        AVG(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_avg_input_usage,
+        AVG(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_avg_output_usage,
+        AVG(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details))) +
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_avg_total_usage,
+        SUM(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_total_input_usage,
+        SUM(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_total_output_usage,
+        SUM(CASE WHEN dri.observation_id IS NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details))) +
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as trace_total_usage,
+
+        -- Observation-level token usage metrics (use trace metrics for full trace totals)
+        AVG(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_avg_input_usage,
+        AVG(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_avg_output_usage,
+        AVG(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details))) +
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_avg_total_usage,
+        SUM(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_total_input_usage,
+        SUM(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_total_output_usage,
+        SUM(CASE WHEN dri.observation_id IS NOT NULL THEN
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, tm.total_usage_details))) +
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, tm.total_usage_details)))
+        ELSE NULL END) as obs_total_usage
 
       FROM dataset_run_items_deduped dri
       LEFT JOIN observations_filtered of ON dri.observation_id = of.id

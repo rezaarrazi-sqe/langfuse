@@ -108,3 +108,41 @@ export const calculateRecursiveCost = (
   const descendants = findObservationDescendants(rootObsId, allObservations);
   return sumObservationCosts(descendants);
 };
+
+/**
+ * Token usage data for observations
+ */
+export type ObservationTokenUsageData = {
+  id: string;
+  parentObservationId?: string | null;
+  inputUsage?: number;
+  outputUsage?: number;
+  totalUsage?: number;
+};
+
+/**
+ * Sum token usage for a list of observations
+ */
+export const sumObservationTokenUsage = (
+  observations: ObservationTokenUsageData[],
+): { input: number; output: number; total: number } => {
+  return observations.reduce(
+    (prev, curr) => ({
+      input: prev.input + (curr.inputUsage ?? 0),
+      output: prev.output + (curr.outputUsage ?? 0),
+      total: prev.total + (curr.totalUsage ?? 0),
+    }),
+    { input: 0, output: 0, total: 0 },
+  );
+};
+
+/**
+ * Calculate recursive token usage for an observation and all its children
+ */
+export const calculateRecursiveTokenUsage = (
+  rootObsId: string,
+  allObservations: ObservationTokenUsageData[],
+): { input: number; output: number; total: number } => {
+  const descendants = findObservationDescendants(rootObsId, allObservations);
+  return sumObservationTokenUsage(descendants);
+};

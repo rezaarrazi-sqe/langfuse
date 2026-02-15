@@ -152,12 +152,18 @@ export const getRunItemsByRunIdOrItemId = async <WithIO extends boolean = true>(
         id: t.traceId,
         duration: t.latency,
         totalCost: t.totalCost,
+        inputUsage: t.inputUsage,
+        outputUsage: t.outputUsage,
+        totalUsage: t.totalUsage,
       }))
       .find((t) => t.id === ri.traceId) ?? {
       // we default to the traceId provided. The traceId must not be missing.
       id: ri.traceId,
       totalCost: 0,
       duration: 0,
+      inputUsage: 0,
+      outputUsage: 0,
+      totalUsage: 0,
     };
 
     const observation =
@@ -166,6 +172,9 @@ export const getRunItemsByRunIdOrItemId = async <WithIO extends boolean = true>(
           id: o.id,
           latency: o.latency,
           calculatedTotalCost: new Decimal(o.totalCost),
+          inputUsage: o.inputUsage,
+          outputUsage: o.outputUsage,
+          totalUsage: o.totalUsage,
         }))
         .find((o) => o.id === ri.observationId) ??
       (ri.observationId
@@ -175,6 +184,9 @@ export const getRunItemsByRunIdOrItemId = async <WithIO extends boolean = true>(
             id: ri.observationId,
             calculatedTotalCost: new Decimal(0),
             latency: 0,
+            inputUsage: 0,
+            outputUsage: 0,
+            totalUsage: 0,
           }
         : undefined);
 

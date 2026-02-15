@@ -24,6 +24,7 @@ import { type DatasetRunItemByRunRowData } from "@/src/features/datasets/lib/typ
 import { LocalIsoDate } from "@/src/components/LocalIsoDate";
 import { useQueryFilterState } from "@/src/features/filters/hooks/useFilterState";
 import { useDebounce } from "@/src/hooks/useDebounce";
+import { BreakdownTooltip } from "@/src/components/trace2/components/_shared/BreakdownToolTip";
 
 export function DatasetRunItemsByRunTable(props: {
   projectId: string;
@@ -167,6 +168,39 @@ export function DatasetRunItemsByRunTable(props: {
         const totalCost: DatasetRunItemByRunRowData["totalCost"] =
           row.getValue("totalCost");
         return totalCost ?? undefined;
+      },
+    },
+    {
+      accessorKey: "totalUsage",
+      header: "Token Usage",
+      id: "totalUsage",
+      size: 100,
+      enableHiding: true,
+      cell: ({ row }) => {
+        const totalUsage: DatasetRunItemByRunRowData["totalUsage"] =
+          row.getValue("totalUsage");
+        const usageDetails = row.original
+          .usageDetails as DatasetRunItemByRunRowData["usageDetails"];
+
+        if (!totalUsage) return undefined;
+
+        if (usageDetails && usageDetails.total > 0) {
+          return (
+            <BreakdownTooltip
+              details={{
+                input: usageDetails.input,
+                output: usageDetails.output,
+                total: usageDetails.total,
+              }}
+              isCost={false}
+            >
+              <span className="cursor-pointer hover:underline">
+                {totalUsage}
+              </span>
+            </BreakdownTooltip>
+          );
+        }
+        return <>{totalUsage}</>;
       },
     },
     {

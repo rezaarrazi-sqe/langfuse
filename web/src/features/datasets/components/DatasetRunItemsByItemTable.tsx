@@ -22,6 +22,7 @@ import {
   TraceObservationIOCell,
 } from "@/src/features/datasets/components/DatasetIOCells";
 import { type DatasetRunItemByItemRowData } from "@/src/features/datasets/lib/types";
+import { BreakdownTooltip } from "@/src/components/trace2/components/_shared/BreakdownToolTip";
 
 export function DatasetRunItemsByItemTable(props: {
   projectId: string;
@@ -199,6 +200,39 @@ export function DatasetRunItemsByItemTable(props: {
         const totalCost: DatasetRunItemByItemRowData["totalCost"] =
           row.getValue("totalCost");
         return totalCost ?? undefined;
+      },
+    },
+    {
+      accessorKey: "totalUsage",
+      header: "Token Usage",
+      id: "totalUsage",
+      size: 100,
+      enableHiding: true,
+      cell: ({ row }) => {
+        const totalUsage: DatasetRunItemByItemRowData["totalUsage"] =
+          row.getValue("totalUsage");
+        const usageDetails = row.original
+          .usageDetails as DatasetRunItemByItemRowData["usageDetails"];
+
+        if (!totalUsage) return undefined;
+
+        if (usageDetails && usageDetails.total > 0) {
+          return (
+            <BreakdownTooltip
+              details={{
+                input: usageDetails.input,
+                output: usageDetails.output,
+                total: usageDetails.total,
+              }}
+              isCost={false}
+            >
+              <span className="cursor-pointer hover:underline">
+                {totalUsage}
+              </span>
+            </BreakdownTooltip>
+          );
+        }
+        return <>{totalUsage}</>;
       },
     },
     {

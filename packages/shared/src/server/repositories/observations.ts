@@ -1467,7 +1467,10 @@ export const getLatencyAndTotalCostForObservationsByTraces = async (
     SELECT
         trace_id,
         sumMap(cost_details)['total'] AS total_cost,
-        dateDiff('millisecond', min(start_time), max(end_time)) AS latency_ms
+        dateDiff('millisecond', min(start_time), max(end_time)) AS latency_ms,
+        arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, sumMap(usage_details)))) AS input_usage,
+        arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, sumMap(usage_details)))) AS output_usage,
+        arraySum(mapValues(sumMap(usage_details))) AS total_usage
     FROM observations FINAL
     WHERE project_id = {projectId: String}
     AND trace_id IN ({traceIds: Array(String)})
@@ -1478,6 +1481,9 @@ export const getLatencyAndTotalCostForObservationsByTraces = async (
     trace_id: string;
     total_cost: string;
     latency_ms: string;
+    input_usage: number;
+    output_usage: number;
+    total_usage: number;
   }>({
     query: query,
     params: {
@@ -1499,6 +1505,9 @@ export const getLatencyAndTotalCostForObservationsByTraces = async (
     traceId: r.trace_id,
     totalCost: Number(r.total_cost),
     latency: Number(r.latency_ms) / 1000,
+    inputUsage: r.input_usage ?? 0,
+    outputUsage: r.output_usage ?? 0,
+    totalUsage: r.total_usage ?? 0,
   }));
 };
 
@@ -1512,6 +1521,9 @@ export type ObservationTuple = [
   inputCost: string,
   outputCost: string,
   latencyMs: number,
+  inputUsage: number,
+  outputUsage: number,
+  totalUsage: number,
 ];
 
 /**
@@ -1537,7 +1549,11 @@ export const getObservationsGroupedByTraceId = async (
           cost_details['total'],
           cost_details['input'],
           cost_details['output'],
-          dateDiff('millisecond', start_time, end_time)
+          dateDiff('millisecond', start_time, end_time),
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, usage_details))),
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, usage_details))),
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'input') > 0, usage_details))) +
+          arraySum(mapValues(mapFilter(x -> positionCaseInsensitive(x.1, 'output') > 0, usage_details)))
         )) AS observations
     FROM observations FINAL
     WHERE project_id = {projectId: String}

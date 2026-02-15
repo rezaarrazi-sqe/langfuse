@@ -64,6 +64,7 @@ import {
 } from "@/src/features/scores/lib/scoreColumns";
 import { getScoreLabelFromKey } from "@/src/features/scores/lib/aggregateScores";
 import { NoDataOrLoading } from "@/src/components/NoDataOrLoading";
+import { BreakdownTooltip } from "@/src/components/trace2/components/_shared/BreakdownToolTip";
 
 export type DatasetRunRowData = {
   id: string;
@@ -73,6 +74,16 @@ export type DatasetRunRowData = {
   avgLatency: number | undefined;
   avgTotalCost: string | undefined;
   totalCost: string | undefined;
+  avgTotalUsage: string | undefined;
+  totalUsage: string | undefined;
+  usageDetails?: {
+    avgInput: number;
+    avgOutput: number;
+    avgTotal: number;
+    totalInput: number;
+    totalOutput: number;
+    total: number;
+  };
   // scores holds grouped column with individual scores
   runItemScores?: ScoreAggregate | undefined;
   runScores?: ScoreAggregate | undefined;
@@ -546,6 +557,76 @@ export function DatasetRunsTable(props: {
       },
     },
     {
+      accessorKey: "avgTotalUsage",
+      header: "Token Usage (avg)",
+      id: "avgTotalUsage",
+      size: 140,
+      enableHiding: true,
+      cell: ({ row }) => {
+        const avgTotalUsage: DatasetRunRowData["avgTotalUsage"] =
+          row.getValue("avgTotalUsage");
+        const usageDetails = row.original
+          .usageDetails as DatasetRunRowData["usageDetails"];
+
+        if (!avgTotalUsage || runsMetrics.isPending)
+          return <Skeleton className="h-3 w-1/2" />;
+
+        if (usageDetails && usageDetails.avgTotal > 0) {
+          return (
+            <BreakdownTooltip
+              details={{
+                input: usageDetails.avgInput,
+                output: usageDetails.avgOutput,
+                total: usageDetails.avgTotal,
+              }}
+              isCost={false}
+            >
+              <span className="cursor-pointer hover:underline">
+                {avgTotalUsage}
+              </span>
+            </BreakdownTooltip>
+          );
+        }
+
+        return <>{avgTotalUsage}</>;
+      },
+    },
+    {
+      accessorKey: "totalUsage",
+      header: "Token Usage (sum)",
+      id: "totalUsage",
+      size: 140,
+      enableHiding: true,
+      cell: ({ row }) => {
+        const totalUsage: DatasetRunRowData["totalUsage"] =
+          row.getValue("totalUsage");
+        const usageDetails = row.original
+          .usageDetails as DatasetRunRowData["usageDetails"];
+
+        if (!totalUsage || runsMetrics.isPending)
+          return <Skeleton className="h-3 w-1/2" />;
+
+        if (usageDetails && usageDetails.total > 0) {
+          return (
+            <BreakdownTooltip
+              details={{
+                input: usageDetails.totalInput,
+                output: usageDetails.totalOutput,
+                total: usageDetails.total,
+              }}
+              isCost={false}
+            >
+              <span className="cursor-pointer hover:underline">
+                {totalUsage}
+              </span>
+            </BreakdownTooltip>
+          );
+        }
+
+        return <>{totalUsage}</>;
+      },
+    },
+    {
       accessorKey: "runScores",
       header: "Run-Level Scores",
       id: "runScores",
@@ -630,6 +711,16 @@ export function DatasetRunsTable(props: {
       totalCost: item.totalCost
         ? usdFormatter(item.totalCost.toNumber())
         : usdFormatter(0),
+      avgTotalUsage: item.avgTotalUsage?.toLocaleString() ?? "0",
+      totalUsage: item.totalUsage?.toLocaleString() ?? "0",
+      usageDetails: {
+        avgInput: item.avgInputUsage ?? 0,
+        avgOutput: item.avgOutputUsage ?? 0,
+        avgTotal: item.avgTotalUsage ?? 0,
+        totalInput: item.totalInputUsage ?? 0,
+        totalOutput: item.totalOutputUsage ?? 0,
+        total: item.totalUsage ?? 0,
+      },
       runItemScores: item.scores,
       runScores: item.runScores
         ? addPrefixToScoreKeys(item.runScores, "Run-level")

@@ -17,6 +17,12 @@ export type DatasetRunItemByItemRowData = {
   scores: ScoreAggregate;
   latency?: number;
   totalCost?: string;
+  totalUsage?: string;
+  usageDetails?: {
+    input: number;
+    output: number;
+    total: number;
+  };
 };
 
 export type DatasetRunItemByRunRowData = {
@@ -36,4 +42,10 @@ export type DatasetRunItemByRunRowData = {
   scores: ScoreAggregate;
   latency?: number;
   totalCost?: string;
+  totalUsage?: string;
+  usageDetails?: {
+    input: number;
+    output: number;
+    total: number;
+  };
 };
