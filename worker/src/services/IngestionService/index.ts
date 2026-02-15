@@ -1370,9 +1370,39 @@ export class IngestionService {
       };
     }
 
+    // Normalize usage units to handle priority token format
+    // OpenAI and other providers may send input_priority, output_priority, etc.
+    // If the main input/output keys are 0 or missing, aggregate from priority keys
+    const normalizedUsageUnits = { ...usageUnits };
+
+    const inputValue = normalizedUsageUnits.input ?? 0;
+    const outputValue = normalizedUsageUnits.output ?? 0;
+
+    // If input is 0 but we have priority tokens, aggregate them
+    if (inputValue === 0) {
+      const inputPriority = normalizedUsageUnits.input_priority ?? 0;
+      const inputPriorityCacheRead = normalizedUsageUnits.input_priority_cache_read ?? 0;
+      const inputCached = normalizedUsageUnits.input_cached_tokens ?? 0;
+
+      if (inputPriority > 0 || inputPriorityCacheRead > 0 || inputCached > 0) {
+        normalizedUsageUnits.input = inputPriority + inputPriorityCacheRead + inputCached;
+      }
+    }
+
+    // If output is 0 but we have priority tokens, aggregate them
+    if (outputValue === 0) {
+      const outputPriority = normalizedUsageUnits.output_priority ?? 0;
+      const outputPriorityReasoning = normalizedUsageUnits.output_priority_reasoning ?? 0;
+      const outputReasoning = normalizedUsageUnits.output_reasoning_tokens ?? 0;
+
+      if (outputPriority > 0 || outputPriorityReasoning > 0 || outputReasoning > 0) {
+        normalizedUsageUnits.output = outputPriority + outputPriorityReasoning + outputReasoning;
+      }
+    }
+
     const finalCostEntries: [string, number][] = [];
 
-    for (const [key, units] of Object.entries(usageUnits)) {
+    for (const [key, units] of Object.entries(normalizedUsageUnits)) {
       const price = modelPrices?.find((price) => price.usageType === key);
 
       if (units != null && price) {
